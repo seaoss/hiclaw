@@ -31,17 +31,17 @@
   "models": {
     "mode": "merge",
     "providers": {
-      "llm-direct": {
-        "baseUrl": "${LLM_API_URL}",
-        "apiKey": "${HICLAW_LLM_API_KEY}",
+      "hiclaw-gateway": {
+        "baseUrl": "http://${HICLAW_AI_GATEWAY_DOMAIN}:8080/v1",
+        "apiKey": "${MANAGER_GATEWAY_KEY}",
         "api": "openai-completions",
         "models": [
           {
             "id": "${HICLAW_DEFAULT_MODEL}",
             "name": "${HICLAW_DEFAULT_MODEL}",
-            "reasoning": false,
-            "contextWindow": 131072,
-            "maxTokens": 32768
+            "reasoning": ${MODEL_REASONING},
+            "contextWindow": ${MODEL_CONTEXT_WINDOW},
+            "maxTokens": ${MODEL_MAX_TOKENS}
           }
         ]
       }
@@ -52,7 +52,7 @@
     "defaults": {
       "workspace": "~/hiclaw-fs/agents/manager",
       "model": {
-        "primary": "llm-direct/${HICLAW_DEFAULT_MODEL}"
+        "primary": "hiclaw-gateway/${HICLAW_DEFAULT_MODEL}"
       },
       "maxConcurrent": 4,
       "subagents": {

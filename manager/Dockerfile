@@ -82,8 +82,9 @@ COPY --from=openclaw-build /usr/local/lib/node_modules /usr/local/lib/node_modul
 COPY --from=openclaw-build /opt/openclaw /opt/openclaw
 COPY --from=openclaw-build /usr/local/bin/mcporter /usr/local/bin/mcporter
 
-# Ensure openclaw binary is on PATH
+# Ensure openclaw binary is on PATH and config is found
 ENV PATH="/opt/openclaw/packages/clawdbot/node_modules/.bin:${PATH}"
+ENV OPENCLAW_CONFIG_PATH="/root/hiclaw-fs/agents/manager/openclaw.json"
 
 # ---- Copy HiClaw configuration and scripts ----
 # Our supervisord.conf replaces the Higress one; our scripts handle all components

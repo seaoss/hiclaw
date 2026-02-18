@@ -76,6 +76,19 @@ higress_api() {
 log "Configuring Higress routes and consumers..."
 
 # ============================================================
+# 0. Register local service sources (all on 127.0.0.1 in all-in-one container)
+#    Higress requires explicit service-source registration even for local services.
+# ============================================================
+higress_api POST /v1/service-sources "Registering Tuwunel service source" \
+    '{"name":"tuwunel","type":"static","domain":"127.0.0.1:6167","port":6167,"properties":{},"authN":{"enabled":false}}'
+
+higress_api POST /v1/service-sources "Registering Element Web service source" \
+    '{"name":"element-web","type":"static","domain":"127.0.0.1:8088","port":8088,"properties":{},"authN":{"enabled":false}}'
+
+higress_api POST /v1/service-sources "Registering MinIO service source" \
+    '{"name":"minio","type":"static","domain":"127.0.0.1:9000","port":9000,"properties":{},"authN":{"enabled":false}}'
+
+# ============================================================
 # 1. Create Manager Consumer (key-auth BEARER)
 # ============================================================
 higress_api POST /v1/consumers "Creating Manager consumer" \
@@ -103,19 +116,26 @@ higress_api POST /v1/routes "Creating HTTP file system route" \
 # 5. AI Gateway Route (LLM Provider + auth)
 # ============================================================
 if [ -n "${HICLAW_LLM_API_KEY}" ]; then
-    # Use OpenAI-compatible protocol with provider-specific endpoint URL.
-    # Higress no longer supports native "qwen" type; use "openai" + rawConfigs.
-    PROVIDER_BODY='{"name":"'"${LLM_PROVIDER}"'","type":"openai","tokens":["'"${HICLAW_LLM_API_KEY}"'"],"modelMapping":{}'
-    if [ -n "${LLM_API_URL}" ]; then
-        PROVIDER_BODY="${PROVIDER_BODY}"',"rawConfigs":{"apiUrl":"'"${LLM_API_URL}"'"}'
-    fi
-    PROVIDER_BODY="${PROVIDER_BODY}"'}'
+    case "${LLM_PROVIDER}" in
+        qwen)
+            PROVIDER_BODY='{"type":"qwen","name":"qwen","tokens":["'"${HICLAW_LLM_API_KEY}"'"],"protocol":"openai/v1","tokenFailoverConfig":{"enabled":false},"rawConfigs":{"qwenEnableSearch":false,"qwenEnableCompatible":true,"qwenFileIds":[]}}'
+            ;;
+        *)
+            PROVIDER_BODY='{"name":"'"${LLM_PROVIDER}"'","type":"openai","tokens":["'"${HICLAW_LLM_API_KEY}"'"],"modelMapping":{},"protocol":"openai/v1"'
+            if [ -n "${LLM_API_URL}" ]; then
+                PROVIDER_BODY="${PROVIDER_BODY}"',"rawConfigs":{"apiUrl":"'"${LLM_API_URL}"'"}'
+            fi
+            PROVIDER_BODY="${PROVIDER_BODY}"'}'
+            ;;
+    esac
 
-    higress_api POST /v1/ai/providers "Configuring LLM Provider (${LLM_PROVIDER} via openai protocol)" \
+    higress_api POST /v1/ai/providers "Configuring LLM Provider (${LLM_PROVIDER})" \
         "${PROVIDER_BODY}"
 
+    AI_ROUTE_BODY='{"name":"default-ai-route","domains":["'"${AI_GATEWAY_DOMAIN}"'"],"pathPredicate":{"matchType":"PRE","matchValue":"/","caseSensitive":false},"upstreams":[{"provider":"'"${LLM_PROVIDER}"'","weight":100,"modelMapping":{}}],"authConfig":{"enabled":true,"allowedCredentialTypes":["key-auth"],"allowedConsumers":["manager"]}}'
+
     higress_api POST /v1/ai/routes "Creating AI Gateway route" \
-        '{"name":"default-ai-route","upstreamType":"provider","upstreams":[{"provider":"'"${LLM_PROVIDER}"'","weight":100}],"authConfig":{"enabled":true,"allowedCredentialTypes":["key-auth"],"allowedConsumers":["manager"]}}'
+        "${AI_ROUTE_BODY}"
 else
     log "Skipping AI Gateway configuration (no HICLAW_LLM_API_KEY)"
 fi

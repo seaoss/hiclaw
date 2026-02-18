@@ -93,8 +93,24 @@ container_create_worker() {
 
     # Build environment variables for the Worker
     local fs_endpoint="http://${manager_ip}:9000"
-    local fs_access_key="${HICLAW_MINIO_USER:-minioadmin}"
-    local fs_secret_key="${HICLAW_MINIO_PASSWORD:-minioadmin}"
+    local fs_access_key="${HICLAW_MINIO_USER:-${HICLAW_ADMIN_USER:-admin}}"
+    local fs_secret_key="${HICLAW_MINIO_PASSWORD:-${HICLAW_ADMIN_PASSWORD:-admin}}"
+
+    # Build ExtraHosts for local domains (*-local.hiclaw.io) that need
+    # in-container resolution back to the Manager. Skip if user provides
+    # real DNS-resolvable domains.
+    local extra_hosts=""
+    local matrix_host="${HICLAW_MATRIX_DOMAIN%%:*}"
+    local matrix_client_host="${HICLAW_MATRIX_CLIENT_DOMAIN:-matrix-client-local.hiclaw.io}"
+    local ai_gw_host="${HICLAW_AI_GATEWAY_DOMAIN:-llm-local.hiclaw.io}"
+    local fs_host="${HICLAW_FS_DOMAIN:-fs-local.hiclaw.io}"
+
+    for h in "${matrix_host}" "${matrix_client_host}" "${ai_gw_host}" "${fs_host}"; do
+        if [[ "${h}" == *-local.hiclaw.io ]]; then
+            extra_hosts="${extra_hosts}\"${h}:${manager_ip}\","
+        fi
+    done
+    extra_hosts="${extra_hosts%,}"
 
     _log "Creating Worker container: ${container_name}"
     _log "  Image: ${WORKER_IMAGE}"
@@ -111,6 +127,12 @@ container_create_worker() {
     fi
 
     # Create the container
+    local host_config="{}"
+    if [ -n "${extra_hosts}" ]; then
+        host_config="{\"ExtraHosts\":[${extra_hosts}]}"
+        _log "  ExtraHosts: ${extra_hosts}"
+    fi
+
     local create_payload
     create_payload=$(cat <<PAYLOAD
 {
@@ -121,7 +143,7 @@ container_create_worker() {
         "HICLAW_FS_ACCESS_KEY=${fs_access_key}",
         "HICLAW_FS_SECRET_KEY=${fs_secret_key}"
     ],
-    "HostConfig": {}
+    "HostConfig": ${host_config}
 }
 PAYLOAD
 )

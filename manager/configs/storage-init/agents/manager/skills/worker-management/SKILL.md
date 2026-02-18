@@ -11,154 +11,67 @@ This skill allows you to manage the full lifecycle of Worker Agents: creation, c
 
 ## Create a Worker
 
-Follow these steps in order. Use the `higress-gateway-management` and `matrix-server-management` skills for the API calls.
+### Step 1: Write SOUL.md
 
-### Step 1: Register Matrix Account
-
-```bash
-curl -X POST http://127.0.0.1:6167/_matrix/client/v3/register \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "username": "<WORKER_NAME>",
-    "password": "<GENERATED_PASSWORD>",
-    "auth": {
-      "type": "m.login.registration_token",
-      "token": "'"${HICLAW_REGISTRATION_TOKEN}"'"
-    }
-  }'
-```
-
-### Step 2: Create Matrix Room (3-party)
-
-Create a Room with the human admin, Manager, and new Worker. See `matrix-server-management` SKILL.md for the exact API call.
-
-### Step 3: Create Higress Consumer (key-auth)
+Write the Worker's identity file based on the human admin's description:
 
 ```bash
-WORKER_KEY=$(openssl rand -hex 32)
-curl -X POST http://127.0.0.1:8001/v1/consumers \
-  -b "${HIGRESS_COOKIE_FILE}" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "worker-<WORKER_NAME>",
-    "credentials": [{
-      "type": "key-auth",
-      "source": "BEARER",
-      "values": ["'"${WORKER_KEY}"'"]
-    }]
-  }'
+mkdir -p ~/hiclaw-fs/agents/<WORKER_NAME>
+cat > ~/hiclaw-fs/agents/<WORKER_NAME>/SOUL.md << 'EOF'
+# Worker Agent - <WORKER_NAME>
+... (role, skills, communication rules, security rules, etc.)
+EOF
 ```
 
-### Step 4: Authorize Route Access
+### Step 2: Run create-worker script
 
-Add the Worker consumer to all relevant routes (AI Gateway, HTTP filesystem, MCP Server):
+The script handles everything: Matrix registration, room creation, Higress consumer, AI/MCP authorization, config generation, MinIO sync, and container startup.
 
 ```bash
-# For each route: GET, add consumer to allowedConsumers, PUT back
-# See higress-gateway-management SKILL.md for the GET-modify-PUT pattern
+bash /opt/hiclaw/scripts/create-worker.sh --name <WORKER_NAME> [--model <MODEL_ID>] [--mcp-servers s1,s2] [--remote]
 ```
 
-### Step 5: Authorize MCP Server Access (if applicable)
+**Parameters**:
+- `--name` (required): Worker name
+- `--model`: optional, bare model name (e.g. `qwen3.5-plus`). Defaults to `${HICLAW_DEFAULT_MODEL}`
+- `--mcp-servers`: optional, comma-separated MCP server names. Defaults to all existing MCP servers
+- `--remote`: force output install command instead of starting container locally
 
-See the **`mcp-server-management`** skill for the full API reference. The key operation is:
+**Deployment behavior** (without `--remote`):
+- If container socket is available: auto-starts Worker container locally
+
+、÷- If no socket: falls back to outputting install command
+
+The script outputs a JSON result after `---RESULT---`:
+
+```json
+{
+  "worker_name": "xiaozhang",
+  "matrix_user_id": "@xiaozhang:matrix-local.hiclaw.io:8080",
+  "room_id": "!abc:matrix-local.hiclaw.io:8080",
+  "consumer": "worker-xiaozhang",
+  "mode": "local",
+  "container_id": "abc123...",
+  "status": "started"
+}
+```
+
+Report the result to the human admin. If `status` is `"pending_install"`, provide the `install_cmd` from the JSON output. Also remind the admin that for remote deployment, the Worker machine must be able to resolve these domains to the Manager's IP (via DNS or `/etc/hosts`):
+
+- `${HICLAW_MATRIX_DOMAIN}` (Matrix homeserver, e.g. `matrix-local.hiclaw.io`)
+- `${HICLAW_AI_GATEWAY_DOMAIN}` (AI Gateway, e.g. `llm-local.hiclaw.io`)
+- `${HICLAW_FS_DOMAIN}` (MinIO file system, e.g. `fs-local.hiclaw.io`)
+
+For local deployment these are auto-resolved via container ExtraHosts.
+
+### Post-creation verification
+
+After a local deployment (`mode: "local"`), verify the Worker is running:
 
 ```bash
-# Add Worker to existing MCP consumer list (this is a REPLACE, include ALL consumers)
-curl -X PUT http://127.0.0.1:8001/v1/mcpServer/consumers \
-  -b "${HIGRESS_COOKIE_FILE}" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "mcpServerName": "mcp-github",
-    "consumers": ["manager", "worker-<WORKER_NAME>"]
-  }'
+bash -c 'source /opt/hiclaw/scripts/container-api.sh && container_status_worker "<WORKER_NAME>"'
+bash -c 'source /opt/hiclaw/scripts/container-api.sh && container_logs_worker "<WORKER_NAME>" 20'
 ```
-
-Also create the Worker's MCP server config file (see `mcp-server-management` skill, "Worker MCP Server Config File" section).
-
-### Step 6: Generate Worker Configuration Files
-
-Write the following files to MinIO (via the local mirror at ~/hiclaw-fs/):
-
-1. `~/hiclaw-fs/agents/<WORKER_NAME>/SOUL.md` - Worker identity and task instructions
-2. `~/hiclaw-fs/agents/<WORKER_NAME>/openclaw.json` - OpenClaw config with:
-   - Matrix credentials (the Worker account password)
-   - groupAllowFrom: Manager + Admin
-   - Model config pointing to AI Gateway with Worker's consumer key
-   - No heartbeat (Manager inquires via Room)
-3. `~/hiclaw-fs/agents/<WORKER_NAME>/mcporter-servers.json` - MCP server endpoints (if MCP access granted)
-
-### Step 7: Update Manager groupAllowFrom
-
-Add the new Worker to your own openclaw.json groupAllowFrom so you can receive messages from them in Rooms.
-
-Use the `config.patch` API or update the config file directly (file-watch triggers hot reload in ~300ms):
-
-```bash
-# Update config file directly:
-jq --arg worker "@<WORKER_NAME>:${HICLAW_MATRIX_DOMAIN}" \
-  '.channels.matrix.groupAllowFrom += [$worker]' \
-  ~/hiclaw-fs/agents/manager/openclaw.json > /tmp/config-updated.json
-mv /tmp/config-updated.json ~/hiclaw-fs/agents/manager/openclaw.json
-```
-
-### Step 8: Start Worker (Two Modes)
-
-Choose the appropriate mode based on the human admin's request:
-
-#### Mode A: Direct Creation (Local Deployment)
-
-Use this when the admin asks to "directly create", "launch locally", or "start the worker here".
-This requires the container runtime socket to be mounted in the Manager container.
-
-```bash
-# Check if container runtime is available
-source /opt/hiclaw/scripts/container-api.sh
-if container_api_available; then
-    # Create and start the Worker container on the host
-    CONTAINER_ID=$(container_create_worker "<WORKER_NAME>")
-    if [ -n "${CONTAINER_ID}" ]; then
-        echo "Worker <WORKER_NAME> started as container: ${CONTAINER_ID:0:12}"
-    fi
-fi
-```
-
-The `container_create_worker` function automatically:
-- Sets the Worker image (`HICLAW_WORKER_IMAGE` env, defaults to `hiclaw/worker-agent:latest`)
-- Passes MinIO credentials and endpoint (derived from Manager's own IP)
-- Creates the container on the host via the mounted socket
-- Starts the container
-
-After creation, verify the Worker is running:
-```bash
-container_status_worker "<WORKER_NAME>"   # Should return "running"
-container_logs_worker "<WORKER_NAME>" 20  # Check startup logs
-```
-
-#### Mode B: Output Install Command (Remote Deployment)
-
-Use this when the admin wants to run the Worker on a different machine, or when the container runtime socket is not available.
-
-Tell the human admin the command to install the Worker:
-
-```
-Run this command to start Worker <WORKER_NAME>:
-
-curl -fsSL https://raw.githubusercontent.com/higress-group/hiclaw/main/install/hiclaw-install.sh | bash -s worker \
-  --name <WORKER_NAME> \
-  --matrix-server http://<MATRIX_DOMAIN>:8080 \
-  --gateway http://<AI_GATEWAY_DOMAIN>:8080 \
-  --fs http://<FS_DOMAIN>:8080 \
-  --fs-key <FS_ACCESS_KEY> \
-  --fs-secret <FS_SECRET_KEY>
-```
-
-**IMPORTANT**: Do NOT include the Worker's Matrix password, API key, or gateway key in the install command or Room messages. These are passed via configuration files in the centralized file system.
-
-#### How to Decide
-
-- If the admin says "直接创建" / "直接启动" / "locally" / "create it directly" → **Mode A**
-- If the admin says "给我命令" / "remote" / doesn't specify → **Mode B**
-- If Mode A fails (socket not available), fall back to **Mode B** and explain why
 
 ## Monitor Workers
 
@@ -186,26 +99,25 @@ Uses dual-key sliding window to prevent downtime:
 
 1. Generate new key
 2. Add new key alongside old key (Consumer has 2 values)
-3. Update Worker's config file (will be synced via mc mirror)
-4. Wait for Worker to pick up new config (~300ms file-watch)
-5. Verify Worker can auth with new key
-6. Remove old key from Consumer
+3. Update Worker's config file in MinIO (`~/hiclaw-fs/agents/<WORKER_NAME>/openclaw.json`)
+4. **Notify the Worker in their Room**: send a message asking them to sync config (e.g., "Please sync your configuration now — credentials have been updated.")
+5. Worker runs `hiclaw-sync` and OpenClaw hot-reloads (~300ms after file change)
+6. Verify Worker can auth with new key
+7. Remove old key from Consumer
 
 See `higress-gateway-management` SKILL.md for the exact API calls.
 
 ## Reset a Worker
 
 1. Revoke the Worker's Higress Consumer (or update credentials)
-2. Remove Worker from all route auth configs
-3. Remove Worker from MCP Server consumer lists
+2. Remove Worker from AI route auth configs (`/v1/ai/routes` — GET, remove from allowedConsumers, PUT)
+3. Remove Worker from MCP Server consumer lists (`/v1/mcpServer/consumers`)
 4. Delete Worker's config directory: `rm -rf ~/hiclaw-fs/agents/<WORKER_NAME>/`
-5. Re-create from scratch (Steps 1-8 above)
-6. The human runs the install command with `--reset` flag
+5. Re-create: write a new SOUL.md and run `create-worker.sh` again (the script handles re-registration gracefully)
 
 ## Important Notes
 
 - Workers are **stateless containers** -- all state is in MinIO. Resetting a Worker just means recreating its config files
 - Worker Matrix accounts persist in Tuwunel (cannot be deleted via API). Reuse same username on reset
 - OpenClaw config hot-reload: file-watch (~300ms) or `config.patch` API
-- Worker's `exec` tool timeout: 10 minutes
-- MinIO file sync: local->remote is real-time, remote->local pulls every 5 minutes
+- **File sync**: after writing any file that a Worker (or another Worker) needs to read, always notify the target Worker via Matrix to run `hiclaw-sync`. This applies to config updates, credential rotation, task briefs, shared data, and cross-Worker collaboration artifacts. Workers have a `file-sync` skill for this. Background periodic sync (every 5 minutes) serves as fallback only

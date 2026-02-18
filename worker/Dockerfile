@@ -64,13 +64,15 @@ COPY --from=openclaw-build /opt/openclaw /opt/openclaw
 COPY --from=openclaw-build /usr/local/lib/node_modules/mcporter /usr/local/lib/node_modules/mcporter
 COPY --from=openclaw-build /usr/local/bin/mcporter /usr/local/bin/mcporter
 
-# Ensure openclaw binary is on PATH
+# Ensure openclaw binary is on PATH and config is found
 ENV PATH="/opt/openclaw/packages/clawdbot/node_modules/.bin:${PATH}"
+ENV OPENCLAW_CONFIG_PATH="/root/workspace/openclaw.json"
 
 # Worker entrypoint and configs
 COPY scripts/ /opt/hiclaw/scripts/
 COPY configs/ /opt/hiclaw/configs/
-RUN chmod +x /opt/hiclaw/scripts/*.sh
+RUN chmod +x /opt/hiclaw/scripts/*.sh && \
+    ln -s /opt/hiclaw/scripts/hiclaw-sync.sh /usr/local/bin/hiclaw-sync
 
 # Worker workspace
 RUN mkdir -p /root/workspace

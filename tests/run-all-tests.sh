@@ -26,8 +26,8 @@ HICLAW_VERSION="${HICLAW_VERSION:-latest}"
 # Test environment variables
 export TEST_ADMIN_USER="${TEST_ADMIN_USER:-admin}"
 export TEST_ADMIN_PASSWORD="${TEST_ADMIN_PASSWORD:-testpassword123}"
-export TEST_MINIO_USER="${TEST_MINIO_USER:-minioadmin}"
-export TEST_MINIO_PASSWORD="${TEST_MINIO_PASSWORD:-minioadmin123}"
+export TEST_MINIO_USER="${TEST_MINIO_USER:-${TEST_ADMIN_USER}}"
+export TEST_MINIO_PASSWORD="${TEST_MINIO_PASSWORD:-${TEST_ADMIN_PASSWORD}}"
 export TEST_REGISTRATION_TOKEN="${TEST_REGISTRATION_TOKEN:-test-reg-token-$(openssl rand -hex 8)}"
 export TEST_MATRIX_DOMAIN="${TEST_MATRIX_DOMAIN:-matrix-local.hiclaw.io:8080}"
 export TEST_MANAGER_HOST="${TEST_MANAGER_HOST:-127.0.0.1}"
@@ -80,8 +80,9 @@ cleanup() {
     if [ "${USE_EXISTING}" = true ]; then
         log "Using existing installation — skipping container cleanup"
         # Still clean up test worker containers
-        docker ps -a --filter "name=hiclaw-test-worker-" --format '{{.Names}}' | \
-            xargs -r docker rm -f 2>/dev/null || true
+        for c in $(docker ps -a --filter "name=hiclaw-test-worker-" --format '{{.Names}}' 2>/dev/null); do
+            docker rm -f "$c" 2>/dev/null || true
+        done
         return
     fi
 
@@ -90,8 +91,9 @@ cleanup() {
     docker rm "${MANAGER_CONTAINER}" 2>/dev/null || true
 
     # Cleanup worker containers
-    docker ps -a --filter "name=hiclaw-test-worker-" --format '{{.Names}}' | \
-        xargs -r docker rm -f 2>/dev/null || true
+    for c in $(docker ps -a --filter "name=hiclaw-test-worker-" --format '{{.Names}}' 2>/dev/null); do
+        docker rm -f "$c" 2>/dev/null || true
+    done
 
     log "Cleanup complete"
 }

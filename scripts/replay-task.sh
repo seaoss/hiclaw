@@ -17,6 +17,8 @@
 #   REPLAY_MATRIX_PORT         Matrix direct port   (default: 6167)
 #   REPLAY_WAIT                Wait for reply        (default: 1, set 0 to skip)
 #   REPLAY_TIMEOUT             Reply timeout secs    (default: 300)
+#   REPLAY_READY_TIMEOUT       Manager readiness timeout (default: 300)
+#   REPLAY_MANAGER_CONTAINER   Manager container name    (default: hiclaw-manager)
 
 set -e
 
@@ -292,18 +294,59 @@ if [ -z "${ROOM_ID}" ]; then
         error "Failed to create DM room with @${MANAGER_USER}. Is the Manager Agent running?"
     fi
     log "Created DM room: ${ROOM_ID}"
-    # Wait briefly for Manager to join/accept the invite
-    sleep 3
 else
     log "Found existing room: ${ROOM_ID}"
 fi
 
-# Step 3: Send message
+# Step 3: Wait for Manager agent to be ready
+# Use `openclaw gateway health` inside the container to confirm the gateway is running
+# and processing Matrix events, then verify Manager has joined the DM room.
+READY_TIMEOUT="${REPLAY_READY_TIMEOUT:-300}"
+READY_ELAPSED=0
+MANAGER_CONTAINER="${REPLAY_MANAGER_CONTAINER:-hiclaw-manager}"
+MANAGER_FULL_ID="@${MANAGER_USER}:${MATRIX_DOMAIN}"
+
+log "Waiting for Manager agent to be ready..."
+
+# Phase 1: Wait for OpenClaw gateway to be healthy inside the container
+GATEWAY_READY=false
+while [ "${READY_ELAPSED}" -lt "${READY_TIMEOUT}" ]; do
+    if docker exec "${MANAGER_CONTAINER}" openclaw gateway health --json 2>/dev/null | grep -q '"ok"' 2>/dev/null; then
+        GATEWAY_READY=true
+        log "Manager OpenClaw gateway is healthy"
+        break
+    fi
+    sleep 5
+    READY_ELAPSED=$((READY_ELAPSED + 5))
+    printf "\r\033[36m[replay]\033[0m Waiting for OpenClaw gateway... (%ds/%ds)" "${READY_ELAPSED}" "${READY_TIMEOUT}"
+done
+
+if [ "${GATEWAY_READY}" != "true" ]; then
+    error "Manager OpenClaw gateway did not become healthy within ${READY_TIMEOUT}s. Check: docker logs ${MANAGER_CONTAINER}"
+fi
+
+# Phase 2: Wait for Manager to join the DM room (confirms Matrix channel is active)
+while [ "${READY_ELAPSED}" -lt "${READY_TIMEOUT}" ]; do
+    MEMBERS=$(get_room_members "${ACCESS_TOKEN}" "${ROOM_ID}" 2>/dev/null) || true
+    if echo "${MEMBERS}" | grep -q "${MANAGER_FULL_ID}"; then
+        log "Manager has joined the room"
+        break
+    fi
+    sleep 3
+    READY_ELAPSED=$((READY_ELAPSED + 3))
+    printf "\r\033[36m[replay]\033[0m Waiting for Manager to join room... (%ds/%ds)" "${READY_ELAPSED}" "${READY_TIMEOUT}"
+done
+
+if ! echo "${MEMBERS}" | grep -q "${MANAGER_FULL_ID}" 2>/dev/null; then
+    error "Manager did not join the room within ${READY_TIMEOUT}s. Gateway is healthy but Matrix channel may not be configured."
+fi
+
+# Step 4: Send message
 log "Sending task message..."
 send_message "${ACCESS_TOKEN}" "${ROOM_ID}" "${TASK_MSG}"
 log "Message sent"
 
-# Step 4: Wait for reply
+# Step 5: Wait for reply
 if [ "${WAIT_FOR_REPLY}" = "1" ]; then
     REPLY=$(wait_for_manager_reply "${ACCESS_TOKEN}" "${ROOM_ID}" "" "${REPLY_TIMEOUT}")
     REPLY_STATUS=$?

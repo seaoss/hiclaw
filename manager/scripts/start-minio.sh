@@ -1,8 +1,8 @@
 #!/bin/bash
 # start-minio.sh - Start MinIO object storage (single node, single disk)
 
-export MINIO_ROOT_USER="${HICLAW_MINIO_USER:-minioadmin}"
-export MINIO_ROOT_PASSWORD="${HICLAW_MINIO_PASSWORD:-minioadmin}"
+export MINIO_ROOT_USER="${HICLAW_MINIO_USER:-${HICLAW_ADMIN_USER:-admin}}"
+export MINIO_ROOT_PASSWORD="${HICLAW_MINIO_PASSWORD:-${HICLAW_ADMIN_PASSWORD:-admin}}"
 
 mkdir -p /data/minio
 

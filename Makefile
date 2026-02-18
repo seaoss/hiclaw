@@ -222,18 +222,28 @@ test-installed: ## Run tests against an already-installed Manager (no container 
 
 # ---------- Install / Uninstall ----------
 
-install: ## Install Manager locally (builds first unless SKIP_BUILD=1)
+install: ## Install Manager locally (non-interactive, set HICLAW_LLM_API_KEY)
 ifndef SKIP_BUILD
 	$(MAKE) build
 endif
-	@echo "==> Installing HiClaw Manager..."
-	HICLAW_VERSION=$(VERSION) HICLAW_MOUNT_SOCKET=1 ./install/hiclaw-install.sh manager
+	@echo "==> Installing HiClaw Manager (non-interactive)..."
+	HICLAW_NON_INTERACTIVE=1 HICLAW_VERSION=$(VERSION) HICLAW_MOUNT_SOCKET=1 ./install/hiclaw-install.sh manager
 
 uninstall: ## Stop and remove Manager + all Worker containers
 	@echo "==> Uninstalling HiClaw..."
 	-docker stop hiclaw-manager 2>/dev/null && docker rm hiclaw-manager 2>/dev/null
-	-docker ps -a --filter "name=hiclaw-worker-" --format '{{.Names}}' | xargs -r docker rm -f 2>/dev/null
+	@for c in $$(docker ps -a --filter "name=hiclaw-worker-" --format '{{.Names}}' 2>/dev/null); do \
+		echo "  Removing Worker: $$c"; \
+		docker rm -f "$$c" 2>/dev/null || true; \
+	done
 	-docker volume rm hiclaw-data 2>/dev/null
+	@if [ -f ./hiclaw-manager.env ]; then \
+		DATA_DIR=$$(grep '^HICLAW_DATA_DIR=' ./hiclaw-manager.env 2>/dev/null | cut -d= -f2); \
+		if [ -n "$$DATA_DIR" ] && [ -d "$$DATA_DIR" ]; then \
+			echo "  External data directory preserved: $$DATA_DIR"; \
+			echo "  To delete: rm -rf $$DATA_DIR"; \
+		fi; \
+	fi
 	-rm -f ./hiclaw-manager.env
 	@echo "==> HiClaw uninstalled"
 
@@ -303,8 +313,8 @@ help: ## Show this help
 	@echo "  make push-native VERSION=dev        # Push native-arch only (dev, overwrites multi-arch!)"
 	@echo ""
 	@echo "Install / Uninstall / Replay:"
-	@echo "  make install                                   # Build + install Manager (interactive)"
-	@echo "  make install HICLAW_LLM_API_KEY=sk-xxx         # Minimal install (all defaults)"
+	@echo "  HICLAW_LLM_API_KEY=sk-xxx make install          # Build + install Manager (non-interactive)"
+	@echo "  HICLAW_LLM_API_KEY=sk-xxx HICLAW_DATA_DIR=~/hiclaw-data make install  # With external data dir"
 	@echo "  make uninstall                                  # Stop + remove Manager and Workers"
 	@echo "  make test-installed                             # Run tests against installed Manager"
 	@echo "  make replay TASK=\"Create worker alice\"          # Send a task to Manager"

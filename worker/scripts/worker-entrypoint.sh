@@ -31,11 +31,22 @@ mc mirror "hiclaw/hiclaw-storage/agents/${WORKER_NAME}/" "${WORKSPACE}/" --overw
 # Also pull shared knowledge
 mc mirror "hiclaw/hiclaw-storage/shared/" "${WORKSPACE}/shared/" --overwrite 2>/dev/null || true
 
-# Verify openclaw.json exists
-if [ ! -f "${WORKSPACE}/openclaw.json" ]; then
-    log "ERROR: openclaw.json not found. Manager may not have created this Worker's config yet."
-    exit 1
-fi
+# Verify essential files exist, retry if sync is still in progress
+RETRY=0
+while [ ! -f "${WORKSPACE}/openclaw.json" ] || [ ! -f "${WORKSPACE}/SOUL.md" ]; do
+    RETRY=$((RETRY + 1))
+    if [ "${RETRY}" -gt 6 ]; then
+        log "ERROR: openclaw.json or SOUL.md not found after retries. Manager may not have created this Worker's config yet."
+        exit 1
+    fi
+    log "Waiting for config files to appear in MinIO (attempt ${RETRY}/6)..."
+    sleep 5
+    mc mirror "hiclaw/hiclaw-storage/agents/${WORKER_NAME}/" "${WORKSPACE}/" --overwrite 2>/dev/null || true
+done
+
+# Symlink to default OpenClaw config path so CLI commands find the config
+mkdir -p /root/.openclaw
+ln -sf "${WORKSPACE}/openclaw.json" /root/.openclaw/openclaw.json
 
 # Copy skill templates
 cp -r /opt/hiclaw/configs/skills/* "${WORKSPACE}/skills/" 2>/dev/null || true
@@ -75,4 +86,4 @@ fi
 # ============================================================
 log "Starting Worker Agent: ${WORKER_NAME}"
 export OPENCLAW_CONFIG_PATH="${WORKSPACE}/openclaw.json"
-exec openclaw
+exec openclaw gateway run --verbose --force

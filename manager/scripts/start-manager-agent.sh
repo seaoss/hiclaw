@@ -7,6 +7,14 @@
 source /opt/hiclaw/scripts/base.sh
 
 MATRIX_DOMAIN="${HICLAW_MATRIX_DOMAIN:-matrix-local.hiclaw.io:8080}"
+AI_GATEWAY_DOMAIN="${HICLAW_AI_GATEWAY_DOMAIN:-llm-local.hiclaw.io}"
+
+# Add local domains to /etc/hosts so they resolve inside the container
+HOSTS_DOMAINS="${MATRIX_DOMAIN%%:*} ${HICLAW_MATRIX_CLIENT_DOMAIN:-matrix-client-local.hiclaw.io} ${AI_GATEWAY_DOMAIN} ${HICLAW_FS_DOMAIN:-fs-local.hiclaw.io}"
+if ! grep -q "${AI_GATEWAY_DOMAIN}" /etc/hosts 2>/dev/null; then
+    echo "127.0.0.1 ${HOSTS_DOMAINS}" >> /etc/hosts
+    log "Added local domains to /etc/hosts"
+fi
 
 # ============================================================
 # Auto-generate secrets if not provided via environment
@@ -181,18 +189,28 @@ log "Generating Manager openclaw.json..."
 export MANAGER_MATRIX_TOKEN="${MANAGER_TOKEN}"
 export MANAGER_GATEWAY_KEY="${HICLAW_MANAGER_GATEWAY_KEY}"
 
-# Resolve LLM API URL for direct access (Manager bypasses AI Gateway to avoid
-# Envoy c-ares DNS resolution issues; Workers still use AI Gateway with key-auth).
-LLM_PROVIDER="${HICLAW_LLM_PROVIDER:-qwen}"
-if [ -z "${HICLAW_LLM_API_URL}" ]; then
-    case "${LLM_PROVIDER}" in
-        qwen)  export LLM_API_URL="https://dashscope.aliyuncs.com/compatible-mode/v1" ;;
-        *)     export LLM_API_URL="" ;;
-    esac
-else
-    export LLM_API_URL="${HICLAW_LLM_API_URL}"
-fi
-log "Manager LLM endpoint: ${LLM_API_URL}"
+# Resolve model parameters based on model name
+MODEL_NAME="${HICLAW_DEFAULT_MODEL:-qwen3.5-plus}"
+case "${MODEL_NAME}" in
+    gpt-5.3-codex|gpt-5-mini|gpt-5-nano)
+        export MODEL_CONTEXT_WINDOW=400000 MODEL_MAX_TOKENS=128000 ;;
+    claude-opus-4-6)
+        export MODEL_CONTEXT_WINDOW=1000000 MODEL_MAX_TOKENS=128000 ;;
+    claude-sonnet-4-5)
+        export MODEL_CONTEXT_WINDOW=1000000 MODEL_MAX_TOKENS=64000 ;;
+    claude-haiku-4-5)
+        export MODEL_CONTEXT_WINDOW=200000 MODEL_MAX_TOKENS=64000 ;;
+    qwen3.5-plus)
+        export MODEL_CONTEXT_WINDOW=960000 MODEL_MAX_TOKENS=64000 ;;
+    deepseek-chat|deepseek-reasoner|kimi-k2.5)
+        export MODEL_CONTEXT_WINDOW=256000 MODEL_MAX_TOKENS=128000 ;;
+    glm-5|MiniMax-M2.5)
+        export MODEL_CONTEXT_WINDOW=200000 MODEL_MAX_TOKENS=128000 ;;
+    *)
+        export MODEL_CONTEXT_WINDOW=200000 MODEL_MAX_TOKENS=128000 ;;
+esac
+export MODEL_REASONING=true
+log "Model: ${MODEL_NAME} (context=${MODEL_CONTEXT_WINDOW}, maxTokens=${MODEL_MAX_TOKENS}, reasoning=${MODEL_REASONING})"
 
 envsubst < /opt/hiclaw/configs/manager-openclaw.json.tmpl > ~/hiclaw-fs/agents/manager/openclaw.json
 
@@ -213,4 +231,9 @@ fi
 # ============================================================
 log "Starting Manager Agent (OpenClaw)..."
 export OPENCLAW_CONFIG_PATH=~/hiclaw-fs/agents/manager/openclaw.json
+
+# Symlink to default OpenClaw config path so CLI commands find the config
+mkdir -p /root/.openclaw
+ln -sf ~/hiclaw-fs/agents/manager/openclaw.json /root/.openclaw/openclaw.json
+
 exec openclaw gateway run --verbose --force

@@ -78,36 +78,73 @@ curl -X PUT http://127.0.0.1:8001/v1/consumers/worker-alice \
 curl -X DELETE http://127.0.0.1:8001/v1/consumers/worker-alice -b "${HIGRESS_COOKIE_FILE}"
 ```
 
-## Route Management
+## AI Route Management
 
-**IMPORTANT**: Route updates use GET-modify-PUT pattern. You must send the complete object.
+AI routes are **internal routes** managed via a separate API at `/v1/ai/routes`. They define LLM provider routing with model-level predicates, domain matching, and consumer auth. **Do NOT use `/v1/routes` for AI routes.**
 
-### List Routes
+### List AI Routes
 
 ```bash
-curl -s http://127.0.0.1:8001/v1/routes -b "${HIGRESS_COOKIE_FILE}" | jq
+curl -s http://127.0.0.1:8001/v1/ai/routes -b "${HIGRESS_COOKIE_FILE}" | jq
 ```
 
-### Get Route by Name
+### Get AI Route by Name
 
 ```bash
-curl -s http://127.0.0.1:8001/v1/routes/http-filesystem -b "${HIGRESS_COOKIE_FILE}" | jq
+curl -s http://127.0.0.1:8001/v1/ai/routes/default-ai-route -b "${HIGRESS_COOKIE_FILE}" | jq
 ```
 
-### Update Route Auth (add/remove Consumer access)
+### Create AI Route
+
+The system initializes with a `default-ai-route` that has no `modelPredicates` — all model requests go through it. When the human asks to add a **new provider**, create a separate AI route with `modelPredicates` to distinguish which models go where:
 
 ```bash
-# Step 1: GET current route
-ROUTE=$(curl -s http://127.0.0.1:8001/v1/routes/http-filesystem -b "${HIGRESS_COOKIE_FILE}")
+# Example: add a DeepSeek route alongside the existing default route
+curl -X POST http://127.0.0.1:8001/v1/ai/routes \
+  -b "${HIGRESS_COOKIE_FILE}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "deepseek-route",
+    "domains": ["llm-local.hiclaw.io"],
+    "pathPredicate": {"matchType": "PRE", "matchValue": "/", "caseSensitive": false},
+    "upstreams": [{"provider": "deepseek", "weight": 100, "modelMapping": {}}],
+    "modelPredicates": [{"matchType": "PRE", "matchValue": "deepseek"}],
+    "authConfig": {
+      "enabled": true,
+      "allowedCredentialTypes": ["key-auth"],
+      "allowedConsumers": ["manager"]
+    }
+  }'
+```
+
+When adding a new provider route with `modelPredicates`, also update the `default-ai-route` to add matching `modelPredicates` for its own models, so routes are unambiguous.
+
+Key fields:
+- **domains**: which domain(s) this AI route serves (e.g. `llm-local.hiclaw.io`)
+- **upstreams**: LLM provider(s) with weight and optional model mapping
+- **modelPredicates**: match models by prefix/exact/regex (e.g. `{"matchType":"PRE","matchValue":"deepseek"}` routes all `deepseek*` models). Omit when only one route exists
+- **authConfig**: consumer-level access control
+
+### Update AI Route (e.g., grant Worker access)
+
+```bash
+# Step 1: GET current AI route
+AI_ROUTE=$(curl -s http://127.0.0.1:8001/v1/ai/routes/default-ai-route -b "${HIGRESS_COOKIE_FILE}")
 
 # Step 2: Add worker-alice to allowedConsumers
-UPDATED=$(echo $ROUTE | jq '.authConfig.allowedConsumers += ["worker-alice"]')
+UPDATED=$(echo $AI_ROUTE | jq '.authConfig.allowedConsumers += ["worker-alice"]')
 
-# Step 3: PUT full object (note: Route has "version" field, include it)
-curl -X PUT http://127.0.0.1:8001/v1/routes/http-filesystem \
+# Step 3: PUT full object (AI Route has "version" field, include it)
+curl -X PUT http://127.0.0.1:8001/v1/ai/routes/default-ai-route \
   -b "${HIGRESS_COOKIE_FILE}" \
   -H 'Content-Type: application/json' \
   -d "$UPDATED"
+```
+
+### Delete AI Route
+
+```bash
+curl -X DELETE http://127.0.0.1:8001/v1/ai/routes/<route-name> -b "${HIGRESS_COOKIE_FILE}"
 ```
 
 ## LLM Provider Configuration
@@ -118,13 +155,42 @@ curl -X PUT http://127.0.0.1:8001/v1/routes/http-filesystem \
 curl -s http://127.0.0.1:8001/v1/ai/providers -b "${HIGRESS_COOKIE_FILE}" | jq
 ```
 
-### Update Provider (add API keys for rotation)
+### Create Provider
 
 ```bash
-curl -X PUT http://127.0.0.1:8001/v1/ai/providers/<provider-name> \
+# Qwen (native type)
+curl -X POST http://127.0.0.1:8001/v1/ai/providers \
   -b "${HIGRESS_COOKIE_FILE}" \
   -H 'Content-Type: application/json' \
-  -d '{...}'
+  -d '{
+    "type": "qwen", "name": "qwen",
+    "tokens": ["<API_KEY>"], "protocol": "openai/v1",
+    "tokenFailoverConfig": {"enabled": false},
+    "rawConfigs": {"qwenEnableSearch": false, "qwenEnableCompatible": true, "qwenFileIds": []}
+  }'
+
+# OpenAI-compatible (generic)
+curl -X POST http://127.0.0.1:8001/v1/ai/providers \
+  -b "${HIGRESS_COOKIE_FILE}" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "type": "openai", "name": "my-provider",
+    "tokens": ["<API_KEY>"], "protocol": "openai/v1",
+    "modelMapping": {},
+    "rawConfigs": {"apiUrl": "https://api.example.com/v1"}
+  }'
+```
+
+### Update Provider (e.g., rotate API keys)
+
+```bash
+# GET-modify-PUT pattern (provider has "version" field)
+PROVIDER=$(curl -s http://127.0.0.1:8001/v1/ai/providers/qwen -b "${HIGRESS_COOKIE_FILE}")
+UPDATED=$(echo $PROVIDER | jq '.tokens = ["<NEW_KEY>"]')
+curl -X PUT http://127.0.0.1:8001/v1/ai/providers/qwen \
+  -b "${HIGRESS_COOKIE_FILE}" \
+  -H 'Content-Type: application/json' \
+  -d "$UPDATED"
 ```
 
 ## MCP Server Management
@@ -134,6 +200,6 @@ For creating, updating, listing, and deleting MCP Servers, as well as managing c
 ## Important Notes
 
 - **Auth Plugin Activation**: First configuration takes ~40s, subsequent changes ~10s
-- **Route version**: Routes have a `version` field. Always GET before PUT to get the latest version
+- **Version field**: AI Routes and Providers have a `version` field. Always GET before PUT to get the latest version.
 - **Consumer version**: Consumers do NOT have a `version` field
 - **MCP Server**: See `mcp-server-management` skill for full details on creating and managing MCP servers

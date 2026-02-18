@@ -5,8 +5,7 @@ source /opt/hiclaw/scripts/base.sh
 waitForService "MinIO" "127.0.0.1" 9000
 
 # Configure mc alias (local access, not through Higress)
-# Defaults must match start-minio.sh to avoid "Access Denied" when env vars are unset
-mc alias set hiclaw http://127.0.0.1:9000 "${HICLAW_MINIO_USER:-minioadmin}" "${HICLAW_MINIO_PASSWORD:-minioadmin}"
+mc alias set hiclaw http://127.0.0.1:9000 "${HICLAW_MINIO_USER:-${HICLAW_ADMIN_USER:-admin}}" "${HICLAW_MINIO_PASSWORD:-${HICLAW_ADMIN_PASSWORD:-admin}}"
 
 # Create default bucket
 mc mb hiclaw/hiclaw-storage --ignore-existing
