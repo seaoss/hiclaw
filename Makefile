@@ -236,6 +236,7 @@ ifdef SKIP_INSTALL
 	./tests/run-all-tests.sh --skip-build --use-existing $(if $(TEST_FILTER),--test-filter "$(TEST_FILTER)") $(if $(INCLUDE_PROJECT_TEST),--include-project-test)
 else
 	@echo "==> Installing Manager and running tests (YOLO mode)"
+	$(MAKE) uninstall 2>/dev/null || true
 	HICLAW_YOLO=1 $(MAKE) install
 	$(MAKE) wait-ready
 	./tests/run-all-tests.sh --skip-build --use-existing $(if $(TEST_FILTER),--test-filter "$(TEST_FILTER)") $(if $(INCLUDE_PROJECT_TEST),--include-project-test)
@@ -275,21 +276,10 @@ uninstall: ## Stop and remove Manager + all Worker containers
 		fi; \
 		WORKSPACE_DIR=$$(grep '^HICLAW_WORKSPACE_DIR=' ./hiclaw-manager.env 2>/dev/null | cut -d= -f2-); \
 		if [ -n "$$WORKSPACE_DIR" ] && [ -d "$$WORKSPACE_DIR" ]; then \
-			if [ -t 0 ]; then \
-				printf "  Remove manager workspace '%s'? [y/N] " "$$WORKSPACE_DIR"; \
-				read REPLY; \
-				if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
-					PARENT=$$(dirname "$$WORKSPACE_DIR"); \
-					BASE=$$(basename "$$WORKSPACE_DIR"); \
-					docker run --rm --entrypoint sh -v "$$PARENT:/host-parent" $(LOCAL_MANAGER) -c "rm -rf /host-parent/$$BASE"; \
-					echo "  Removed: $$WORKSPACE_DIR"; \
-				else \
-					echo "  Manager workspace preserved: $$WORKSPACE_DIR"; \
-				fi; \
-			else \
-				echo "  Manager workspace preserved: $$WORKSPACE_DIR"; \
-				echo "  To delete: rm -rf $$WORKSPACE_DIR"; \
-			fi; \
+			PARENT=$$(dirname "$$WORKSPACE_DIR"); \
+			BASE=$$(basename "$$WORKSPACE_DIR"); \
+			docker run --rm --entrypoint sh -v "$$PARENT:/host-parent" $(LOCAL_MANAGER) -c "rm -rf /host-parent/$$BASE"; \
+			echo "  Removed: $$WORKSPACE_DIR"; \
 		fi; \
 	fi
 	-rm -f ./hiclaw-manager.env
