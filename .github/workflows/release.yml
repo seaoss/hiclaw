@@ -39,5 +39,5 @@ jobs:
             ## Quick Start
 
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install/hiclaw-install.sh | bash -s manager
+            bash <(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install/hiclaw-install.sh)
             ```
