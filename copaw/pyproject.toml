@@ -20,7 +20,6 @@ Repository = "https://github.com/higress-group/hiclaw"
 
 [project.scripts]
 copaw-worker = "copaw_worker.cli:main"
-lite-copaw-worker = "lite_copaw_worker.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -53,15 +53,14 @@ if [ -n "${CONSOLE_PORT}" ]; then
         --install-dir "${INSTALL_DIR}" \
         --console-port "${CONSOLE_PORT}"
 else
-    # ---------- Lite mode: lite-copaw-worker (lite CoPaw venv, headless) ----------
-    export COPAW_HEADLESS=1
+    # ---------- Lite mode: lite CoPaw venv, headless ----------
     VENV="/opt/venv/lite"
-    log "Starting lite-copaw-worker: ${WORKER_NAME}"
+    log "Starting copaw-worker: ${WORKER_NAME}"
     log "  FS endpoint: ${FS_ENDPOINT}"
     log "  Install dir: ${INSTALL_DIR}"
     log "  CoPaw: lite (${VENV})"
 
-    exec "${VENV}/bin/lite-copaw-worker" \
+    exec "${VENV}/bin/copaw-worker" \
         --name "${WORKER_NAME}" \
         --fs "${FS_ENDPOINT}" \
         --fs-key "${FS_ACCESS_KEY}" \
