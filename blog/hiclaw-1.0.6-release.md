@@ -52,6 +52,49 @@ In HiClaw 1.0.6, both Manager and Workers use mcporter to interact with MCP serv
 
 ---
 
+## MCP and SKILLS: Complementary, Not Competing
+
+Before diving into HiClaw's MCP integration architecture, it's worth clarifying the **relationship between MCP and SKILLS**.
+
+### HiClaw's Open Skills Ecosystem
+
+HiClaw supports an **open SKILLS marketplace** through [skills.sh](https://skills.sh), as well as **enterprise self-hosted SKILLS marketplaces** via Nacos. SKILLS are scenario-oriented, iterable capability packages:
+
+- **Scenario-oriented**: Combine atomic tools into complete business workflows
+- **Continuously evolving**: Optimize and improve based on real-world experience
+- **Knowledge accumulation**: Include best practices, error handling, and parameter descriptions
+
+### MCP's Role in the Ecosystem
+
+MCP is **not meant to replace SKILLS** — it serves as a **complement to the SKILLS ecosystem**, enabling rapid conversion of existing APIs into standardized agent-usable tools. MCP's core value lies in:
+
+- **Clear constraints and specifications**: More rigorous tool definitions and type constraints
+- **Permission governance system**: Reuse MCP's authentication/authorization capabilities (MCP Server-level permission management, tool-level supported in Enterprise Edition)
+- **Batch conversion capability**: Especially in enterprise scenarios, Higress-based MCP gateway capabilities enable painless batch conversion of existing APIs into MCP tools with fine-grained management
+
+### mcporter as a Bridge
+
+Through CLI tools like mcporter, HiClaw achieves **re-orchestration and organization of MCP tools**, forming iterable SKILLs:
+
+```
+MCP Tools (Atomic Capabilities)
+    ↓ mcporter orchestration
+SKILLs (Scenario-based Capability Packages)
+    ↓ Practical usage
+SKILL Iterative Optimization
+```
+
+### SKILL + MCP = 1+1 > 2
+
+The best practice for both is:
+
+- **SKILLs handle scenario evolution**: Adapt to actual business scenarios, continuously iterate on skill composition logic and best practices
+- **MCP handles fine-grained permission control**: Align with business capabilities for MCP Server and tool permission governance and credential management
+
+This complementary relationship achieves the **SKILL + MCP 1+1 > 2 effect**: Enterprises can enjoy the rich capabilities of the open SKILLS marketplace while maintaining secure, fine-grained permission control over internal APIs through the MCP gateway.
+
+---
+
 ## The Architecture: How It All Works
 
 Here's the complete flow when you want to add a new API tool for your workers:
@@ -60,7 +103,7 @@ Here's the complete flow when you want to add a new API tool for your workers:
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              YOU (Human)                                     │
 │                                                                              │
-│  "Add a weather API: GET https://api.weather.com/v1/forecast?city={city}"   │
+│  "Add a stock index API: GET https://api.finance.com/v1/index?symbol={symbol}"│
 │  "Auth via X-API-Key header, here's my key: sk_xxx"                         │
 └────────────────────────────────────┬────────────────────────────────────────┘
                                      │
@@ -69,9 +112,9 @@ Here's the complete flow when you want to add a new API tool for your workers:
 │                           MANAGER CLAW                                       │
 │                                                                              │
 │  1. Generates MCP Server YAML config from your description                  │
-│  2. Runs setup-mcp-server.sh weather "sk_xxx" --yaml-file /tmp/weather.yaml │
-│  3. Verifies with mcporter: mcporter call weather.get_forecast city=Tokyo   │
-│  4. Notifies Workers: "New MCP server 'weather' is ready"                   │
+│  2. Runs setup-mcp-server.sh stock-index "sk_xxx" --yaml-file /tmp/stock.yaml │
+│  3. Verifies with mcporter: mcporter call stock-index.get_index symbol=000001.SH │
+│  4. Notifies Workers: "New MCP server 'stock-index' is ready"               │
 └────────────────────────────────────┬────────────────────────────────────────┘
                                      │
                                      ▼
@@ -79,9 +122,9 @@ Here's the complete flow when you want to add a new API tool for your workers:
 │                        HIGRESS AI GATEWAY                                    │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  MCP Server: weather-mcp-server                                      │   │
+│  │  MCP Server: stock-index-mcp-server                                  │   │
 │  │  ├─ Real Credential: sk_xxx (STORED SECURELY, NEVER EXPOSED)        │   │
-│  │  ├─ Tool: get_forecast(city: string) → weather data                 │   │
+│  │  ├─ Tool: get_index(symbol: string) → stock index data              │   │
 │  │  └─ Authorized Consumers: manager, worker-alice, worker-bob         │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
@@ -96,19 +139,35 @@ Here's the complete flow when you want to add a new API tool for your workers:
 │                                                                              │
 │  1. Receives notification from Manager                                      │
 │  2. Pulls updated mcporter config from MinIO                                │
-│  3. Discovers tools: mcporter list weather --schema                         │
-│  4. Tests tool: mcporter call weather.get_forecast city=Shanghai            │
+│  3. Discovers tools: mcporter list stock-index --schema                     │
+│  4. Tests tool: mcporter call stock-index.get_index symbol=000001.SH        │
 │  5. Generates SKILL.md based on understanding                               │
 │  6. Ready to use in future tasks!                                           │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │  Worker's View:                                                      │   │
 │  │  ├─ Has: Consumer token (like an "ID badge")                        │   │
-│  │  ├─ Can do: Call weather.get_forecast via gateway                   │   │
+│  │  ├─ Can do: Call stock-index.get_index via gateway                  │   │
 │  │  └─ Cannot do: See the real API key sk_xxx                          │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+Once configured, the Manager can view the list of tools under the MCP Server in the **Higress Console** and perform further permission management:
+
+![Higress MCP Tool Management Interface](https://img.alicdn.com/imgextra/i3/O1CN01armHyk1Lc9XTGz7ZX_!!6000000001319-2-tps-1452-849.png)
+
+Through the console, you can:
+- View all tools contained in the MCP Server
+- Configure MCP Server-level access permissions for each Consumer (Worker)
+- Monitor tool invocation and performance metrics
+- Dynamically adjust permission policies without restarting services
+
+> **Permission Management Notes**:
+> - **Higress Open Source**: Supports **MCP Server-level** permission management (e.g., Worker A can access the entire `stock-index` MCP Server)
+> - **Higress Enterprise Edition**: Supports **tool-level** permission management (e.g., Worker A can only call `stock-index.get_index`, but not `stock-index.update_index`)
+> 
+> HiClaw 1.0.6 implements MCP Server-level security isolation based on the open-source version, which already meets the permission control requirements of most enterprise scenarios.
 
 **Key Security Principle: Workers never see real credentials.**
 

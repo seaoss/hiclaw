@@ -52,6 +52,49 @@ mcporter call github.search_repositories query="hiclaw" limit=5
 
 ---
 
+## MCP 与 SKILLS：互补而非替代
+
+在了解 HiClaw 的 MCP 集成架构前，有必要先澄清 **MCP 和 SKILLS 的关系**。
+
+### HiClaw 的开放技能生态
+
+HiClaw 通过对接 [skills.sh](https://skills.sh) 支持**开放的 SKILLS 市场**，并且支持对接 **Nacos 的企业自建 SKILLS 市场**。SKILLS 是面向实际场景的、可迭代的能力包装：
+
+- **场景导向**：将多个原子工具组合成完整的业务流程
+- **持续演进**：基于实战经验不断优化和改进
+- **知识沉淀**：包含最佳实践、错误处理、参数说明
+
+### MCP 在生态中的定位
+
+MCP 并不是要取代 SKILLS，而是作为 **SKILLS 生态中的补充**，用于快速将已有的 API 转换成标准的 Agent 可使用的工具。MCP 的核心价值在于：
+
+- **明确的约束和规范**：对工具有着更严格的定义和类型约束
+- **权限治理体系**：可以复用 MCP 的认证鉴权能力（MCP Server 粒度的权限管理，企业版支持工具粒度）
+- **批量转换能力**：尤其在企业场景下，基于 Higress 的 MCP 网关能力可以无痛地将大量存量 API 批量转换成 MCP 工具，实现精细化管理
+
+### mcporter 的桥接作用
+
+通过 mcporter 这样的 CLI 工具，HiClaw 实现了 **MCP 工具的重新编排和组织**，形成可迭代的 SKILL：
+
+```
+MCP 工具（原子能力）
+    ↓ mcporter 编排
+SKILL（场景化能力包）
+    ↓ 实战使用
+SKILL 迭代优化
+```
+
+### SKILL + MCP = 1+1 > 2
+
+两者的最佳实践是：
+
+- **SKILL 负责场景演进**：贴合实际业务场景，不断迭代技能的组合逻辑和最佳实践
+- **MCP 负责细粒度权限管控**：贴合业务能力做好 MCP Server 和工具的权限治理与凭证管理
+
+这种互补关系实现了 **SKILL + MCP 1+1 大于 2 的效果**：企业既能享受开放 SKILLS 市场的丰富能力，又能通过 MCP 网关对企业内部 API 实现安全、精细的权限管控。
+
+---
+
 ## 架构：一切如何运作
 
 当你想为 Worker 添加一个新的 API 工具时，完整流程如下：
@@ -60,7 +103,7 @@ mcporter call github.search_repositories query="hiclaw" limit=5
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              你（人类）                                       │
 │                                                                              │
-│  "添加一个天气 API：GET https://api.weather.com/v1/forecast?city={city}"    │
+│  "添加一个股票指数 API：GET https://api.finance.com/v1/index?symbol={symbol}"│
 │  "通过 X-API-Key header 认证，这是我的 key：sk_xxx"                          │
 └────────────────────────────────────┬────────────────────────────────────────┘
                                      │
@@ -69,9 +112,9 @@ mcporter call github.search_repositories query="hiclaw" limit=5
 │                           MANAGER CLAW                                       │
 │                                                                              │
 │  1. 根据你的描述生成 MCP Server YAML 配置                                    │
-│  2. 运行 setup-mcp-server.sh weather "sk_xxx" --yaml-file /tmp/weather.yaml │
-│  3. 用 mcporter 验证：mcporter call weather.get_forecast city=Tokyo         │
-│  4. 通知 Worker："新 MCP 服务器 'weather' 已就绪"                            │
+│  2. 运行 setup-mcp-server.sh stock-index "sk_xxx" --yaml-file /tmp/stock.yaml │
+│  3. 用 mcporter 验证：mcporter call stock-index.get_index symbol=000001.SH  │
+│  4. 通知 Worker："新 MCP 服务器 'stock-index' 已就绪"                        │
 └────────────────────────────────────┬────────────────────────────────────────┘
                                      │
                                      ▼
@@ -79,9 +122,9 @@ mcporter call github.search_repositories query="hiclaw" limit=5
 │                        HIGRESS AI GATEWAY                                    │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  MCP Server: weather-mcp-server                                      │   │
+│  │  MCP Server: stock-index-mcp-server                                  │   │
 │  │  ├─ 真实凭证: sk_xxx（安全存储，永不暴露）                            │   │
-│  │  ├─ 工具: get_forecast(city: string) → 天气数据                      │   │
+│  │  ├─ 工具: get_index(symbol: string) → 股票指数数据                   │   │
 │  │  └─ 授权消费者: manager, worker-alice, worker-bob                    │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
@@ -96,19 +139,35 @@ mcporter call github.search_repositories query="hiclaw" limit=5
 │                                                                              │
 │  1. 收到 Manager 的通知                                                       │
 │  2. 从 MinIO 拉取最新的 mcporter 配置                                         │
-│  3. 发现工具：mcporter list weather --schema                                 │
-│  4. 测试工具：mcporter call weather.get_forecast city=Shanghai               │
+│  3. 发现工具：mcporter list stock-index --schema                             │
+│  4. 测试工具：mcporter call stock-index.get_index symbol=000001.SH           │
 │  5. 基于理解生成 SKILL.md                                                     │
 │  6. 后续任务中即可使用该工具！                                                 │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │  Worker 的视角：                                                      │   │
 │  │  ├─ 拥有：Consumer token（就像一张"工牌"）                            │   │
-│  │  ├─ 可以：通过网关调用 weather.get_forecast                          │   │
+│  │  ├─ 可以：通过网关调用 stock-index.get_index                         │   │
 │  │  └─ 不可以：看到真实的 API key sk_xxx                                 │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+配置完成后，Manager 可以在 **Higress 控制台**查看 MCP Server 下的工具列表，并进行进一步的权限管理：
+
+![Higress MCP 工具管理界面](https://img.alicdn.com/imgextra/i3/O1CN01armHyk1Lc9XTGz7ZX_!!6000000001319-2-tps-1452-849.png)
+
+通过控制台，你可以：
+- 查看 MCP Server 包含的所有工具
+- 为每个 Consumer（Worker）配置 MCP Server 级别的访问权限
+- 监控工具调用情况和性能指标
+- 动态调整权限策略，无需重启服务
+
+> **权限管理说明**：
+> - **Higress 开源版**：支持 **MCP Server 粒度**的权限管理（例如：Worker A 可以访问整个 `stock-index` MCP Server）
+> - **Higress 企业版**：支持 **工具粒度**的权限管理（例如：Worker A 只能调用 `stock-index.get_index`，但不能调用 `stock-index.update_index`）
+> 
+> HiClaw 1.0.6 基于开源版实现了 MCP Server 级别的安全隔离，已能满足大部分企业场景的权限管控需求。
 
 **核心安全原则：Worker 永远看不到真实凭证。**
 
